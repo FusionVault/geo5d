@@ -1,0 +1,38 @@
+# geo5d — the geopotential & relativistic dimension of geodesy, in pure f64.
+#
+# WORK IN PROGRESS — a thin vertical slice. Where geo3d answers "where" (frames) and geo4d answers
+# "when" (time), geo5d answers how gravity and relativity warp both: normal gravity and geopotential,
+# height systems, chronometric leveling (clock frequency ↔ geopotential ↔ height), and the
+# relativistic clock-rate layer. Pure formulas, no data; absolute geopotential is bring-your-own via
+# a model, exactly as geo3d's ellipsoid is a value you pass in.
+#
+# Package metadata is pinned here rather than inherited from a workspace so the crate publishes
+# unchanged from its own repository.
+[package]
+name = "geo5d"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "The geopotential & relativistic dimension of geodesy in pure f64: normal gravity, height systems, chronometric leveling (clock frequency ↔ geopotential ↔ height), and relativistic clock rates. Built on geo4d/geo3d. (Work in progress.)"
+repository = "https://github.com/FusionVault/geo5d"
+readme = "README.md"
+documentation = "https://docs.rs/geo5d"
+keywords = ["geodesy", "relativity", "geopotential", "gravity", "clocks"]
+categories = ["science::geo", "aerospace", "mathematics"]
+exclude = [".github/", ".gitignore", "rustfmt.toml"]
+
+[dependencies]
+# The lower layers: geo4d re-exports geo3d, so geo5d gets frames + time from one dependency.
+geo4d = "0.1.1"
+# Optional: `Serialize`/`Deserialize` on the public types.
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde", "geo4d/serde"]
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.dev]
+debug = "line-tables-only"
