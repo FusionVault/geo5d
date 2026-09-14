@@ -271,17 +271,25 @@ impl SphericalHarmonicModel {
         self.potential(position) - normal.potential(position)
     }
 
-    /// The geoid undulation `N = T/γ` (Bruns' formula) at a geodetic position, metres — the height of
-    /// the geoid above the reference ellipsoid, using `normal` as the reference field and `gravity`
-    /// as the normal gravity.
+    /// The height anomaly / quasigeoid `ζ = T/γ − (W₀ − U₀)/γ` at a geodetic position, metres — the
+    /// separation between the geopotential surface `W = W₀` and the reference ellipsoid. `T` is the
+    /// disturbing potential against the `normal` field, `gravity` the normal gravity (carrying its
+    /// `u0`), and `w0` the adopted geoid potential (e.g. [`W0_IHRS`](crate::W0_IHRS)).
+    ///
+    /// The `−(W₀−U₀)/γ` **zero-degree term** is essential and easy to forget: leaving it out biases
+    /// the result by ~0.5 m. This is the data-free Molodensky quantity; the classical geoid `N`
+    /// differs from the height anomaly by the topographic (Bouguer) term over high terrain — up to
+    /// ~1 m in the Himalaya — which needs a crustal-density hypothesis and is out of scope here.
     pub fn geoid_undulation(
         &self,
         position: Geodetic,
         normal: &SphericalHarmonicModel,
         gravity: &NormalGravity,
+        w0: f64,
     ) -> f64 {
         let ecef = geo4d::WGS84.to_ecef(position);
-        self.disturbing_potential(ecef, normal) / gravity.at_geodetic(position)
+        let gamma = gravity.at_geodetic(position);
+        self.disturbing_potential(ecef, normal) / gamma - (w0 - gravity.u0) / gamma
     }
 
     /// The gravity disturbance `δg = |g_model| − γ` at a geodetic position, m/s² (positive where the
@@ -553,17 +561,16 @@ mod tests {
 
     #[test]
     fn normal_field_has_zero_geoid_and_disturbance_against_itself() {
-        // The disturbing potential of the normal field relative to itself is identically zero → the
-        // geoid undulation and gravity disturbance vanish (a self-consistency check of T = V − U).
+        // The disturbing potential of the normal field relative to itself is identically zero → with
+        // w0 = U0 the geoid undulation (T/γ − (w0−U0)/γ) vanishes too.
         let model = SphericalHarmonicModel::grs80_normal_field();
         let normal = SphericalHarmonicModel::grs80_normal_field();
+        let ng = NormalGravity::GRS80;
         for lat in [0.0, 45.0, 80.0] {
             let g = Geodetic::new(lat, 10.0, 0.0);
-            assert!(close(
-                model.geoid_undulation(g, &normal, &NormalGravity::GRS80),
-                0.0,
-                1e-9
-            ));
+            assert!(close(model.geoid_undulation(g, &normal, &ng, ng.u0), 0.0, 1e-9));
+            // A geoid potential 9.8 m²/s² below U0 raises the undulation by ~1 m (the zero-degree term).
+            assert!(close(model.geoid_undulation(g, &normal, &ng, ng.u0 - 9.8), 1.0, 0.02));
         }
     }
 

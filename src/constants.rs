@@ -75,6 +75,8 @@ pub const WGS84_GAMMA_P: f64 = 9.832_184_937_8;
 pub const WGS84_K: f64 = 0.001_931_852_652;
 /// WGS84 first eccentricity squared.
 pub const WGS84_E2: f64 = 0.006_694_379_990_14;
+/// WGS84 normal potential on the ellipsoid `U₀`, m²/s².
+pub const WGS84_U0: f64 = 62_636_851.714_6;
 
 #[cfg(test)]
 mod tests {

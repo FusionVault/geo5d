@@ -35,6 +35,9 @@ pub struct NormalGravity {
     pub gm: f64,
     /// Angular velocity, rad/s.
     pub omega: f64,
+    /// Normal potential on the ellipsoid surface `U₀`, m²/s² — the reference potential the geoid is
+    /// measured against.
+    pub u0: f64,
 }
 
 impl NormalGravity {
@@ -47,6 +50,7 @@ impl NormalGravity {
         f: GRS80_F,
         gm: GRS80_GM,
         omega: GRS80_OMEGA,
+        u0: GRS80_U0,
     };
 
     /// WGS84 (GPS).
@@ -58,6 +62,7 @@ impl NormalGravity {
         f: 1.0 / 298.257_223_563,
         gm: 3.986_004_418e14,
         omega: 7.292_115e-5,
+        u0: WGS84_U0,
     };
 
     /// Normal gravity on the ellipsoid surface at a geodetic latitude (degrees) — the Somigliana

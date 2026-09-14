@@ -72,7 +72,7 @@ fn main() {
          gfc 0 0 1.0 0.0\ngfc 2 0 -0.484166774985e-3 0.0\ngfc 3 1 2.0e-6 -1.0e-6\n",
     )
     .unwrap();
-    let n = perturbed.geoid_undulation(site, &field, &NormalGravity::GRS80);
+    let n = perturbed.geoid_undulation(site, &field, &NormalGravity::GRS80, W0_IHRS);
     let dg = perturbed.gravity_anomaly(site, &field);
     println!(
         "\n(synthetic) geoid undulation {:.2} m, gravity anomaly {:+.1} mGal",

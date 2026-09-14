@@ -35,10 +35,19 @@ frames, time, and this. Everything is exact, data-free formula and `#![forbid(un
 - **`constants`** — the defining constants, including **both** conventional reference geopotentials
   `W₀` (the IAU value frozen into `L_G`, and the IHRS height-datum value) with distinct roles.
 
-The spherical-harmonic engine is validated end-to-end with **no external data**: synthesizing the
-GRS80 normal field from its even zonal coefficients reproduces the closed-form Somigliana normal
-gravity across latitudes (including the pole) to a µGal. Feed it a real ICGEM `.gfc` model and it
-gives an absolute `W`, which flows straight into the chronometric-leveling and clock-rate layers.
+The spherical-harmonic engine is validated internally (synthesizing the GRS80 normal field from its
+even zonal coefficients reproduces closed-form Somigliana normal gravity across latitudes, and the
+gravity-gradient tensor satisfies the Laplace identity) **and against independent implementations on
+the real EGM96 model**: geo5d's gravity `|∇V|` matches [pyshtools](https://shtools.github.io/) to
+**0.05 µGal (5×10⁻¹¹)** across a global grid, and its geoid matches [GeographicLib](https://geographiclib.sourceforge.io/)
+to a uniform **~9 cm** (a W₀/tide-system convention constant) away from high terrain.
+
+Feed the engine a real ICGEM `.gfc` model and it gives an absolute `W`, which flows straight into the
+chronometric-leveling and clock-rate layers.
+
+> Note: `geoid_undulation` returns the **height anomaly / quasigeoid** (data-free), with the essential
+> `−(W₀−U₀)/γ` zero-degree term. The classical geoid differs from it by the topographic (Bouguer)
+> term over high terrain — up to ~1 m in the Himalaya — which needs a crustal-density hypothesis.
 
 ```rust
 use geo5d::{relativity, GeopotentialNumber, NormalGravity};
@@ -66,11 +75,8 @@ redshift experiment (Takamoto et al. 2020: Δh = 452.6 m ⇒ Δν ≈ 21.2 Hz on
 
 ## Roadmap (researched, not yet built)
 
-- Cross-validation against GeographicLib's `GravityModel` on a real EGM (e.g. EGM2008) model, in the
-  family's "checked against an independent implementation" tradition, and a benchmark of the
-  synthesis at high degree. (No Rust library does physical-geodesy synthesis today — the engine here
-  is validated internally against Somigliana and the Laplace identity; the next step is an external
-  cross-check.)
+- A first-class classical-geoid option (height anomaly → geoid via the Bouguer term) for users who
+  supply topographic heights, and higher-degree synthesis benchmarks.
 - The ns-level periodic `TDB − TT` series and the `TCG/TCB/TDB` rate transforms, layered on `geo4d`'s
   TAI epoch (the linear rates are here in `constants`; the periodic series is the remaining piece).
 
