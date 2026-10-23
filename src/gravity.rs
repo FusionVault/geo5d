@@ -50,8 +50,11 @@ struct Partials {
 
 /// Geocentric radius, colatitude and longitude of an ECEF position.
 fn spherical(position: Ecef) -> (f64, f64, f64) {
-    let r = position.vec().norm();
-    let theta = (position.z / r).clamp(-1.0, 1.0).acos();
+    let rho = position.x.hypot(position.y);
+    let r = rho.hypot(position.z);
+    // atan2, not acos(z/r), which rounds to θ = 0 within ~1 cm of the axis. A point exactly on the
+    // axis is taken 1 nm off it: the field changes by far less than f64 resolution there.
+    let theta = rho.max(1e-9).atan2(position.z);
     let lambda = position.y.atan2(position.x);
     (r, theta, lambda)
 }
@@ -91,6 +94,9 @@ pub enum GfcError {
     MissingHeader(&'static str),
     /// A `gfc` coefficient line was malformed.
     BadCoefficientLine,
+    /// The file is valid but holds something this static model cannot represent: time-variable
+    /// records (`gfct`/`trnd`/`dot`/`acos`/`asin`) or unnormalized coefficients.
+    Unsupported(&'static str),
 }
 
 impl core::fmt::Display for GfcError {
@@ -98,6 +104,7 @@ impl core::fmt::Display for GfcError {
         match self {
             GfcError::MissingHeader(k) => write!(f, "missing .gfc header key: {k}"),
             GfcError::BadCoefficientLine => f.write_str("malformed .gfc coefficient line"),
+            GfcError::Unsupported(what) => write!(f, "unsupported .gfc content: {what}"),
         }
     }
 }
@@ -183,6 +190,10 @@ impl SphericalHarmonicModel {
     /// Parse an ICGEM `.gfc` model file: the `earth_gravity_constant`, `radius` and `max_degree`
     /// header keys, then `gfc  n  m  C̄  S̄  [σC σS]` coefficient lines. Rotation rate defaults to the
     /// GRS80 value (override with [`with_omega`](Self::with_omega)).
+    ///
+    /// Static models only: a time-variable model (GOCO06s, EIGEN-6S4, …) or one with unnormalized
+    /// coefficients is refused with [`GfcError::Unsupported`] rather than read wrongly. Evaluate a
+    /// time-variable model at your epoch first and build it with [`new`](Self::new).
     pub fn from_gfc(text: &str) -> Result<Self, GfcError> {
         let (mut gm, mut a, mut nmax) = (None, None, None);
         for line in text.lines() {
@@ -191,6 +202,12 @@ impl SphericalHarmonicModel {
                 Some("earth_gravity_constant") => gm = it.next().and_then(parse_f64),
                 Some("radius") => a = it.next().and_then(parse_f64),
                 Some("max_degree") => nmax = it.next().and_then(|s| s.parse::<usize>().ok()),
+                Some("norm") if it.next() == Some("unnormalized") => {
+                    return Err(GfcError::Unsupported("unnormalized coefficients"));
+                }
+                Some("gfct" | "trnd" | "dot" | "acos" | "asin") => {
+                    return Err(GfcError::Unsupported("time-variable model (gfct/trnd/acos/asin)"));
+                }
                 _ => {}
             }
         }
@@ -202,7 +219,7 @@ impl SphericalHarmonicModel {
         let mut snm = vec![0.0; size];
         for line in text.lines() {
             let mut it = line.split_whitespace();
-            if !matches!(it.next(), Some("gfc") | Some("gfct")) {
+            if it.next() != Some("gfc") {
                 continue;
             }
             let n: usize = it
@@ -329,7 +346,9 @@ impl SphericalHarmonicModel {
     /// The gravity-gradient (Marussi) tensor `∂²V/∂xᵢ∂xⱼ` of the **gravitational** potential at an
     /// ECEF position, in the local East-North-Up frame, s⁻² — the quantity a gradiometer (GOCE,
     /// cold-atom) measures. Symmetric, and trace-free outside the masses (Laplace's equation), which
-    /// is a good self-check. Rows/columns are ordered East, North, Up.
+    /// is a good self-check. Rows/columns are ordered East, North, Up. Exactly on the rotation axis,
+    /// where East and North are undefined, it is evaluated 1 nm off the axis toward λ = 0 and holds
+    /// to ~1e-5 relative.
     pub fn gradient_tensor_enu(&self, position: Ecef) -> [[f64; 3]; 3] {
         let (r, theta, _lambda) = spherical(position);
         let p = self.synthesize(r, theta, _lambda);
@@ -351,6 +370,7 @@ impl SphericalHarmonicModel {
     /// Synthesis: the potential `V` and all its first and second spherical partial derivatives at a
     /// geocentric radius `r`, colatitude `θ` and longitude `λ`. Holmes–Featherstone stable recursion
     /// with global scaling.
+    #[allow(clippy::needless_range_loop)] // n also drives the column recursion, not just col1[n]
     fn synthesize(&self, r: f64, theta: f64, lambda: f64) -> Partials {
         let (t, u) = (theta.cos(), theta.sin()); // t = cosθ, u = sinθ
         let rho = self.a / r;
@@ -360,6 +380,21 @@ impl SphericalHarmonicModel {
         let (mut v, mut vr, mut vrr) = (0.0, 0.0, 0.0);
         let (mut vt, mut vtt, mut vrt) = (0.0, 0.0, 0.0);
         let (mut vl, mut vll, mut vrl, mut vtl) = (0.0, 0.0, 0.0, 0.0);
+
+        // The order-1 column and its θ-derivative: the zonal derivatives below are taken from it,
+        // because the generic form divides a vanishing difference by sinθ near the poles.
+        let mut col1 = vec![(0.0, 0.0); nmax + 1];
+        if nmax >= 1 {
+            let (mut p_n, mut p_nm1) = (self.sectorial(1, u), 0.0);
+            for (n, slot) in col1.iter_mut().enumerate().skip(1) {
+                *slot = (p_n, dp_dtheta(n, 1, t, u, p_n, p_nm1));
+                if n < nmax {
+                    let p_next = self.column_next(n + 1, 1, t, p_n, p_nm1);
+                    p_nm1 = p_n;
+                    p_n = p_next;
+                }
+            }
+        }
 
         for m in 0..=nmax {
             let mut rho_n = rho.powi(m as i32);
@@ -376,12 +411,15 @@ impl SphericalHarmonicModel {
             for n in m..=nmax {
                 let c = self.cnm[idx(n, m)];
                 let s = self.snm[idx(n, m)];
-                let (dp, ddp) = if n == 0 || u == 0.0 {
+                let (dp, ddp) = if n == 0 {
                     (0.0, 0.0)
+                } else if m == 0 {
+                    // dP̄_n0/dθ = −√(n(n+1)/2)·P̄_n1, exact at the poles; differentiated once more
+                    // for the second derivative.
+                    let k = -((n * (n + 1)) as f64 / 2.0).sqrt();
+                    (k * col1[n].0, k * col1[n].1)
                 } else {
-                    // dP̄/dθ = [ n·t·P̄ − f·P̄_{n-1} ]/u,  f = √(((2n+1)/(2n-1))(n-m)(n+m)).
-                    let f = (((2 * n + 1) as f64 / (2 * n - 1) as f64) * ((n - m) * (n + m)) as f64).sqrt();
-                    let dp = (n as f64 * t * p_n - f * p_nm1) / u;
+                    let dp = dp_dtheta(n, m, t, u, p_n, p_nm1);
                     // d²P̄/dθ² = −(t/u)·dP̄/dθ − (n(n+1) − m²/u²)·P̄.
                     let ddp = -(t / u) * dp - ((n * (n + 1)) as f64 - (m * m) as f64 / (u * u)) * p_n;
                     (dp, ddp)
@@ -501,6 +539,13 @@ impl GravityModel for SphericalHarmonicModel {
     }
 }
 
+/// `dP̄_nm/dθ = [n·t·P̄_nm − f·P̄_{n-1,m}]/u`, `f = √(((2n+1)/(2n-1))(n-m)(n+m))`, for `m ≥ 1`
+/// (`P̄_nm` carries a factor `u^m`, so the division loses nothing).
+fn dp_dtheta(n: usize, m: usize, t: f64, u: f64, p_n: f64, p_nm1: f64) -> f64 {
+    let f = (((2 * n + 1) as f64 / (2 * n - 1) as f64) * ((n - m) * (n + m)) as f64).sqrt();
+    (n as f64 * t * p_n - f * p_nm1) / u
+}
+
 fn parse_f64(s: &str) -> Option<f64> {
     // ICGEM files sometimes use Fortran 'D' exponents.
     s.replace(['D', 'd'], "e").parse().ok()
@@ -592,6 +637,59 @@ gfc 2 2 2.439e-6 -1.400e-6
         assert!(close(m.reference_radius(), 6_378_136.3, 1e-3));
         // A missing header is an error.
         assert!(SphericalHarmonicModel::from_gfc("gfc 0 0 1 0").is_err());
+    }
+
+    #[test]
+    fn gfc_parser_refuses_what_it_cannot_represent() {
+        let head = "earth_gravity_constant 3.986004415e14\nradius 6378136.3\nmax_degree 2\nend_of_head\n";
+        for body in [
+            "gfct 2 0 -4.84e-4 0.0 20100101\ntrnd 2 0 -2e-11 0.0\n",
+            "acos 2 0 8e-11 0.0 1.0\n",
+        ] {
+            let err = SphericalHarmonicModel::from_gfc(&format!("{head}{body}")).unwrap_err();
+            assert!(matches!(err, GfcError::Unsupported(_)), "{err}");
+        }
+        let unnormalized = format!("norm unnormalized\n{head}gfc 2 0 -1.08e-3 0.0\n");
+        assert!(matches!(
+            SphericalHarmonicModel::from_gfc(&unnormalized),
+            Err(GfcError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn acceleration_is_exact_on_the_rotation_axis() {
+        // Near the poles the C̄21/S̄21 potential is ±GM·a²·√15·(C̄21·x + S̄21·y)/r⁴ (P̄21 ∝ sinθ·cosθ),
+        // so on the axis its horizontal gravity is exactly ±GM·a²·√15·(C̄21, S̄21)/r⁴. This used to
+        // be NaN.
+        let dc = 1e-6;
+        let model = field(&[(2, 1, dc, 2.0 * dc)]);
+        let r: f64 = 6_400_000.0;
+        let k = GRS80_GM * GRS80_A * GRS80_A * 15f64.sqrt() / r.powi(4);
+        for z in [r, -r] {
+            let k = k * z.signum();
+            let g = model.acceleration(Ecef::new(0.0, 0.0, z));
+            assert!(close(g.x, k * dc, 1e-9 * (k * dc).abs()), "{z}: {}", g.x);
+            assert!(close(g.y, k * 2.0 * dc, 1e-9 * (k * dc).abs()), "{z}: {}", g.y);
+            // 1 µm off the axis (where acos(z/r) used to round to 0) agrees, up to the ~1e-12 m/s²
+            // the field really changes over 1 µm.
+            let near = model.acceleration(Ecef::new(1e-6, 0.0, z));
+            assert!(close(near.x, g.x, 1e-10) && close(near.y, g.y, 1e-10) && close(near.z, g.z, 1e-10));
+        }
+    }
+
+    #[test]
+    fn zonal_derivatives_stay_accurate_near_the_pole() {
+        // The generic (n·t·P̄ − f·P̄_{n−1})/sinθ form lost ~2 digits per decade of θ here.
+        let model = field(&[]);
+        let (r, theta): (f64, f64) = (7.0e6, 1e-7);
+        let p = model.synthesize(r, theta, 0.3);
+        let (t, u) = (theta.cos(), theta.sin());
+        let q = GRS80_A / r;
+        let dp20 = -3.0 * 5f64.sqrt() * t * u;
+        let dp40 = -3.0 / 8.0 * (140.0 * t.powi(3) - 60.0 * t) * u;
+        let expect =
+            GRS80_GM / r * (q.powi(2) * -0.484_166_774_985e-3 * dp20 + q.powi(4) * 0.790_303_733_511e-6 * dp40);
+        assert!(close(p.vt, expect, 1e-9 * expect.abs()), "{} vs {expect}", p.vt);
     }
 
     #[test]

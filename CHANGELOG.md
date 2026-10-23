@@ -2,6 +2,14 @@
 
 All notable changes to `geo5d`. Plain semver; tags `vX.Y.Z` at the published commit.
 
+## 0.3.0 — 2026-10-23
+
+Fixes near the poles and in the `.gfc` reader, from a cross-check against an independent synthesis (the `geopotential` crate) on the real degree-300 GOCO06s model. Away from the poles the two agree to ~1e-15 in `V` and ~1e-6 µGal in `|g|`. With these fixes they agree near the poles too.
+
+- **Fix:** the gravity vector was **NaN within ~1 cm of the rotation axis**, and so was everything built on it (`gravity`, `gravity_magnitude`, `gravity_disturbance`, the tensor). Its horizontal components also lost precision within ~1 m of the axis. Colatitude came from `acos(z/r)`, which rounds to 0 there. It is now computed with `atan2`, and a point exactly on the axis is evaluated 1 nm off it.
+- **Fix:** the zonal (m = 0) θ-derivatives are now taken from the order-1 column, `dP̄n0/dθ = −√(n(n+1)/2)·P̄n1`. The old form divided a vanishing difference by `sinθ` and lost about 2 digits per decade of θ approaching the poles; the new one is exact at the poles.
+- **Breaking:** `from_gfc` refuses time-variable models (`gfct`/`trnd`/`dot`/`acos`/`asin` records, e.g. GOCO06s) and `norm unnormalized` files with the new `GfcError::Unsupported`. It used to read `gfct` as static and drop the trend and periodic terms without a warning. Evaluate a time-variable model at your epoch first and build it with `SphericalHarmonicModel::new`.
+
 ## 0.2.0 — 2026-09-14
 
 Precision fix to the geoid, from a cross-check against GeographicLib and pyshtools on the real EGM96 model. The gravity synthesis was already exact — geo5d matches pyshtools' `|∇V|` to **0.05 µGal** (5×10⁻¹¹) across a global grid — but the geoid formula was missing its zero-degree term.
