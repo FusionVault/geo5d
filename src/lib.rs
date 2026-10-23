@@ -54,3 +54,5 @@ pub use normal::NormalGravity;
 // Re-export the layers geo5d builds on, so one dependency brings frames, time, and this.
 pub use geo4d;
 pub use geo4d::{Duration, Ecef, Ellipsoid, Epoch, Geodetic, StateVector, Trajectory, Vec3, GRS80, WGS84};
+/// The spherical-harmonic engine behind [`gravity`], re-exported so its types match.
+pub use geopotential;

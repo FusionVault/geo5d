@@ -3,10 +3,12 @@
 //! built on.
 //!
 //! The algorithm is small; the coefficients are enormous (EGM2008 is ~4.7 million of them). So this
-//! module ships the **math** — the Holmes–Featherstone stable recursion and the synthesis — and
-//! takes the coefficients as a value you provide, exactly as `geo3d` takes an `Ellipsoid` rather
-//! than baking one in. Load them from an ICGEM `.gfc` file with [`SphericalHarmonicModel::from_gfc`],
-//! or use the built-in GRS80/WGS84 normal fields.
+//! module ships the **math** and takes the coefficients as a value you provide, exactly as `geo3d`
+//! takes an `Ellipsoid` rather than baking one in. The synthesis itself (Holmes–Featherstone, with
+//! pole-safe first and second derivatives, to degree 2700) is the [`geopotential`] crate's. Load
+//! coefficients from an ICGEM `.gfc` file with [`SphericalHarmonicModel::from_gfc`], from any
+//! [`geopotential::Coefficients`] (time-variable models via the `gravity-field` crate) with
+//! [`SphericalHarmonicModel::from_coefficients`], or use the built-in GRS80/WGS84 normal fields.
 //!
 //! The whole engine is validated end-to-end with **no external data**: synthesizing the GRS80 normal
 //! field from its even zonal coefficients reproduces Somigliana [`NormalGravity`] to a µGal.
@@ -27,15 +29,13 @@ pub trait GravityModel {
     fn acceleration(&self, position: Ecef) -> Vec3;
 }
 
-/// The large scaling factor for the Holmes–Featherstone recursion: sectorials near the pole would
-/// otherwise underflow `f64` at high degree, so the whole recursion runs pre-multiplied by this and
-/// is un-scaled at the end.
-const HF_SCALE: f64 = 1e280;
-const HF_SCALE_INV: f64 = 1e-280;
-
-/// The potential `V` and its first and second spherical partial derivatives at a point.
+/// The potential `V` and its first and second spherical partial derivatives at a point, with
+/// `u = sinθ` and `t = cosθ` exactly as the synthesis used them (so `∂V/∂λ / u` stays consistent
+/// on the rotation axis).
 #[derive(Clone, Copy, Debug)]
 struct Partials {
+    u: f64,
+    t: f64,
     v: f64,
     vr: f64,
     vrr: f64,
@@ -77,14 +77,8 @@ fn spherical(position: Ecef) -> (f64, f64, f64) {
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SphericalHarmonicModel {
-    gm: f64,
-    a: f64,
+    field: geopotential::Coefficients,
     omega: f64,
-    nmax: usize,
-    /// C̄_nm at triangular index `n(n+1)/2 + m`.
-    cnm: Vec<f64>,
-    /// S̄_nm at the same index.
-    snm: Vec<f64>,
 }
 
 /// Why a `.gfc` model could not be parsed.
@@ -124,14 +118,28 @@ impl SphericalHarmonicModel {
             cnm.len() >= need && snm.len() >= need,
             "coefficient arrays too short for nmax"
         );
-        SphericalHarmonicModel {
-            gm,
-            a,
-            omega,
-            nmax,
-            cnm,
-            snm,
+        let mut field = geopotential::Coefficients::zeros(gm, a, nmax);
+        for n in 0..=nmax {
+            for m in 0..=n {
+                field.set(n, m, cnm[idx(n, m)], snm[idx(n, m)]);
+            }
         }
+        SphericalHarmonicModel { field, omega }
+    }
+
+    /// From a [`geopotential::Coefficients`] set, e.g. a time-variable ICGEM model read with the
+    /// `gravity-field` crate and evaluated at an epoch. Rotation rate defaults to GRS80's (override
+    /// with [`with_omega`](Self::with_omega)).
+    pub fn from_coefficients(field: geopotential::Coefficients) -> Self {
+        SphericalHarmonicModel {
+            field,
+            omega: crate::constants::GRS80_OMEGA,
+        }
+    }
+
+    /// The coefficients behind this model.
+    pub fn coefficients(&self) -> &geopotential::Coefficients {
+        &self.field
     }
 
     /// The GRS80 normal field (the even zonal coefficients of the level ellipsoid). Synthesizing it
@@ -168,23 +176,12 @@ impl SphericalHarmonicModel {
 
     /// Build a zonal-only field from `C̄_20, C̄_40, C̄_60, C̄_80` (a level ellipsoid's normal potential).
     fn normal_field(gm: f64, a: f64, omega: f64, even_zonals: [f64; 4]) -> Self {
-        let nmax = 8;
-        let n = (nmax + 1) * (nmax + 2) / 2;
-        let mut cnm = vec![0.0; n];
-        let snm = vec![0.0; n];
-        cnm[idx(0, 0)] = 1.0;
-        cnm[idx(2, 0)] = even_zonals[0];
-        cnm[idx(4, 0)] = even_zonals[1];
-        cnm[idx(6, 0)] = even_zonals[2];
-        cnm[idx(8, 0)] = even_zonals[3];
-        SphericalHarmonicModel {
-            gm,
-            a,
-            omega,
-            nmax,
-            cnm,
-            snm,
+        let mut field = geopotential::Coefficients::zeros(gm, a, 8);
+        field.set(0, 0, 1.0, 0.0);
+        for (k, c) in even_zonals.into_iter().enumerate() {
+            field.set(2 * k + 2, 0, c, 0.0);
         }
+        SphericalHarmonicModel { field, omega }
     }
 
     /// Parse an ICGEM `.gfc` model file: the `earth_gravity_constant`, `radius` and `max_degree`
@@ -192,8 +189,9 @@ impl SphericalHarmonicModel {
     /// GRS80 value (override with [`with_omega`](Self::with_omega)).
     ///
     /// Static models only: a time-variable model (GOCO06s, EIGEN-6S4, …) or one with unnormalized
-    /// coefficients is refused with [`GfcError::Unsupported`] rather than read wrongly. Evaluate a
-    /// time-variable model at your epoch first and build it with [`new`](Self::new).
+    /// coefficients is refused with [`GfcError::Unsupported`] rather than read wrongly. Read a
+    /// time-variable model with the `gravity-field` crate, evaluate it at your epoch, and build the
+    /// model with [`from_coefficients`](Self::from_coefficients).
     pub fn from_gfc(text: &str) -> Result<Self, GfcError> {
         let (mut gm, mut a, mut nmax) = (None, None, None);
         for line in text.lines() {
@@ -214,9 +212,10 @@ impl SphericalHarmonicModel {
         let gm = gm.ok_or(GfcError::MissingHeader("earth_gravity_constant"))?;
         let a = a.ok_or(GfcError::MissingHeader("radius"))?;
         let nmax = nmax.ok_or(GfcError::MissingHeader("max_degree"))?;
-        let size = (nmax + 1) * (nmax + 2) / 2;
-        let mut cnm = vec![0.0; size];
-        let mut snm = vec![0.0; size];
+        if nmax > geopotential::MAX_DEGREE {
+            return Err(GfcError::Unsupported("max_degree above 2700"));
+        }
+        let mut field = geopotential::Coefficients::zeros(gm, a, nmax);
         for line in text.lines() {
             let mut it = line.split_whitespace();
             if it.next() != Some("gfc") {
@@ -233,18 +232,10 @@ impl SphericalHarmonicModel {
             let c = it.next().and_then(parse_f64).ok_or(GfcError::BadCoefficientLine)?;
             let s = it.next().and_then(parse_f64).ok_or(GfcError::BadCoefficientLine)?;
             if n <= nmax && m <= n {
-                cnm[idx(n, m)] = c;
-                snm[idx(n, m)] = s;
+                field.set(n, m, c, s);
             }
         }
-        Ok(SphericalHarmonicModel {
-            gm,
-            a,
-            omega: crate::constants::GRS80_OMEGA,
-            nmax,
-            cnm,
-            snm,
-        })
+        Ok(SphericalHarmonicModel::from_coefficients(field))
     }
 
     /// The same model with a different rotation rate (rad/s).
@@ -256,7 +247,7 @@ impl SphericalHarmonicModel {
     /// Maximum degree of the expansion.
     #[inline]
     pub fn max_degree(&self) -> usize {
-        self.nmax
+        self.field.max_degree()
     }
 
     /// The geopotential `W = V + ½ω²(x² + y²)` (gravitational plus centrifugal) at an ECEF position,
@@ -340,7 +331,7 @@ impl SphericalHarmonicModel {
         let (pm, pn) = (self.synthesize(r, theta, lambda), normal.synthesize(r, theta, lambda));
         let (tt, tl) = (pm.vt - pn.vt, pm.vl - pn.vl);
         let g = gravity.at_geodetic(position);
-        (tt / (g * r), -tl / (g * r * theta.sin()))
+        (tt / (g * r), -tl / (g * r * pm.u))
     }
 
     /// The gravity-gradient (Marussi) tensor `∂²V/∂xᵢ∂xⱼ` of the **gravitational** potential at an
@@ -352,7 +343,7 @@ impl SphericalHarmonicModel {
     pub fn gradient_tensor_enu(&self, position: Ecef) -> [[f64; 3]; 3] {
         let (r, theta, _lambda) = spherical(position);
         let p = self.synthesize(r, theta, _lambda);
-        let (u, t) = (theta.sin(), theta.cos());
+        let (u, t) = (p.u, p.t);
         let (r2, cot) = (r * r, t / u);
         // Physical second-derivative components in the spherical (r, θ, λ) frame.
         let g_rr = p.vrr;
@@ -368,144 +359,25 @@ impl SphericalHarmonicModel {
     }
 
     /// Synthesis: the potential `V` and all its first and second spherical partial derivatives at a
-    /// geocentric radius `r`, colatitude `θ` and longitude `λ`. Holmes–Featherstone stable recursion
-    /// with global scaling.
-    #[allow(clippy::needless_range_loop)] // n also drives the column recursion, not just col1[n]
+    /// geocentric radius `r`, colatitude `θ` and longitude `λ`, by the `geopotential` crate
+    /// (Holmes–Featherstone, pole-safe derivatives, to degree 2700).
     fn synthesize(&self, r: f64, theta: f64, lambda: f64) -> Partials {
-        let (t, u) = (theta.cos(), theta.sin()); // t = cosθ, u = sinθ
-        let rho = self.a / r;
-        let nmax = self.nmax;
-
-        // Σ_m accumulators (after applying the trig for each order).
-        let (mut v, mut vr, mut vrr) = (0.0, 0.0, 0.0);
-        let (mut vt, mut vtt, mut vrt) = (0.0, 0.0, 0.0);
-        let (mut vl, mut vll, mut vrl, mut vtl) = (0.0, 0.0, 0.0, 0.0);
-
-        // The order-1 column and its θ-derivative: the zonal derivatives below are taken from it,
-        // because the generic form divides a vanishing difference by sinθ near the poles.
-        let mut col1 = vec![(0.0, 0.0); nmax + 1];
-        if nmax >= 1 {
-            let (mut p_n, mut p_nm1) = (self.sectorial(1, u), 0.0);
-            for (n, slot) in col1.iter_mut().enumerate().skip(1) {
-                *slot = (p_n, dp_dtheta(n, 1, t, u, p_n, p_nm1));
-                if n < nmax {
-                    let p_next = self.column_next(n + 1, 1, t, p_n, p_nm1);
-                    p_nm1 = p_n;
-                    p_n = p_next;
-                }
-            }
-        }
-
-        for m in 0..=nmax {
-            let mut rho_n = rho.powi(m as i32);
-            // Per-order C̄ / S̄ lumped sums, weighted by the radial/derivative factor each needs.
-            let (mut am, mut bm) = (0.0, 0.0); // × P
-            let (mut am_r, mut bm_r) = (0.0, 0.0); // × (n+1) P
-            let (mut am_rr, mut bm_rr) = (0.0, 0.0); // × (n+1)(n+2) P
-            let (mut am_t, mut bm_t) = (0.0, 0.0); // × dP/dθ
-            let (mut am_tt, mut bm_tt) = (0.0, 0.0); // × d²P/dθ²
-            let (mut am_rt, mut bm_rt) = (0.0, 0.0); // × (n+1) dP/dθ
-
-            let mut p_n = self.sectorial(m, u); // n = m
-            let mut p_nm1 = 0.0; // n = m-1 → 0
-            for n in m..=nmax {
-                let c = self.cnm[idx(n, m)];
-                let s = self.snm[idx(n, m)];
-                let (dp, ddp) = if n == 0 {
-                    (0.0, 0.0)
-                } else if m == 0 {
-                    // dP̄_n0/dθ = −√(n(n+1)/2)·P̄_n1, exact at the poles; differentiated once more
-                    // for the second derivative.
-                    let k = -((n * (n + 1)) as f64 / 2.0).sqrt();
-                    (k * col1[n].0, k * col1[n].1)
-                } else {
-                    let dp = dp_dtheta(n, m, t, u, p_n, p_nm1);
-                    // d²P̄/dθ² = −(t/u)·dP̄/dθ − (n(n+1) − m²/u²)·P̄.
-                    let ddp = -(t / u) * dp - ((n * (n + 1)) as f64 - (m * m) as f64 / (u * u)) * p_n;
-                    (dp, ddp)
-                };
-                let w = rho_n;
-                let nn1 = (n + 1) as f64;
-                let nn2 = (n + 1) as f64 * (n + 2) as f64;
-                am += w * c * p_n;
-                bm += w * s * p_n;
-                am_r += nn1 * w * c * p_n;
-                bm_r += nn1 * w * s * p_n;
-                am_rr += nn2 * w * c * p_n;
-                bm_rr += nn2 * w * s * p_n;
-                am_t += w * c * dp;
-                bm_t += w * s * dp;
-                am_tt += w * c * ddp;
-                bm_tt += w * s * ddp;
-                am_rt += nn1 * w * c * dp;
-                bm_rt += nn1 * w * s * dp;
-
-                if n < nmax {
-                    let p_next = self.column_next(n + 1, m, t, p_n, p_nm1);
-                    p_nm1 = p_n;
-                    p_n = p_next;
-                    rho_n *= rho;
-                }
-            }
-
-            let mf = m as f64;
-            let (cml, sml) = ((mf * lambda).cos(), (mf * lambda).sin());
-            let even = |a: f64, b: f64| a * cml + b * sml; // combos that keep the trig
-            let dl = |a: f64, b: f64| mf * (-a * sml + b * cml); // ∂/∂λ combos
-            v += even(am, bm);
-            vr += even(am_r, bm_r);
-            vrr += even(am_rr, bm_rr);
-            vt += even(am_t, bm_t);
-            vtt += even(am_tt, bm_tt);
-            vrt += even(am_rt, bm_rt);
-            vl += dl(am, bm);
-            vll += -mf * mf * even(am, bm);
-            vrl += dl(am_r, bm_r);
-            vtl += dl(am_t, bm_t);
-        }
-
-        // Un-scale and apply the GM/r prefactors.
-        let s = HF_SCALE_INV;
-        let (gmr, gmr2, gmr3) = (self.gm / r, self.gm / (r * r), self.gm / (r * r * r));
+        let lat = core::f64::consts::FRAC_PI_2 - theta;
+        let sp = self.field.second_partials(r, lat, lambda);
+        // θ = π/2 − φ: first θ-derivatives change sign, second ones do not.
         Partials {
-            v: gmr * v * s,
-            vr: -gmr2 * vr * s,
-            vrr: gmr3 * vrr * s,
-            vt: gmr * vt * s,
-            vtt: gmr * vtt * s,
-            vrt: -gmr2 * vrt * s,
-            vl: gmr * vl * s,
-            vll: gmr * vll * s,
-            vrl: -gmr2 * vrl * s,
-            vtl: gmr * vtl * s,
-        }
-    }
-
-    /// Scaled sectorial `P̄_mm` seeded per the Holmes–Featherstone convention.
-    fn sectorial(&self, m: usize, u: f64) -> f64 {
-        if m == 0 {
-            return HF_SCALE; // P̄_00 = 1
-        }
-        // P̄_11 = √3·u, then P̄_mm = u·√((2m+1)/(2m))·P̄_{m-1,m-1}.
-        let mut p = 3.0f64.sqrt() * u * HF_SCALE; // m = 1
-        for k in 2..=m {
-            p *= u * ((2 * k + 1) as f64 / (2 * k) as f64).sqrt();
-        }
-        p
-    }
-
-    /// One column-recursion step for `P̄_nm` (n ≥ m+1) from `P̄_{n-1,m}` and `P̄_{n-2,m}`.
-    fn column_next(&self, n: usize, m: usize, t: f64, p_nm1: f64, p_nm2: f64) -> f64 {
-        if n == m + 1 {
-            // First off-sectorial: P̄_{m+1,m} = t·√(2m+3)·P̄_mm.
-            t * ((2 * m + 3) as f64).sqrt() * p_nm1
-        } else {
-            let (nf, mf) = (n as f64, m as f64);
-            let a = (((2.0 * nf - 1.0) * (2.0 * nf + 1.0)) / ((nf - mf) * (nf + mf))).sqrt();
-            let b = (((2.0 * nf + 1.0) * (nf + mf - 1.0) * (nf - mf - 1.0))
-                / ((nf - mf) * (nf + mf) * (2.0 * nf - 3.0)))
-                .sqrt();
-            a * t * p_nm1 - b * p_nm2
+            u: lat.cos(),
+            t: lat.sin(),
+            v: sp.first.v,
+            vr: sp.first.dr,
+            vrr: sp.drr,
+            vt: -sp.first.dlat,
+            vtt: sp.dlatlat,
+            vrt: -sp.drlat,
+            vl: sp.first.dlon,
+            vll: sp.dlonlon,
+            vrl: sp.drlon,
+            vtl: -sp.dlatlon,
         }
     }
 }
@@ -513,11 +385,11 @@ impl SphericalHarmonicModel {
 impl GravityModel for SphericalHarmonicModel {
     #[inline]
     fn gm(&self) -> f64 {
-        self.gm
+        self.field.gm
     }
     #[inline]
     fn reference_radius(&self) -> f64 {
-        self.a
+        self.field.radius
     }
 
     fn potential(&self, position: Ecef) -> f64 {
@@ -528,7 +400,7 @@ impl GravityModel for SphericalHarmonicModel {
     fn acceleration(&self, position: Ecef) -> Vec3 {
         let (r, theta, lambda) = spherical(position);
         let p = self.synthesize(r, theta, lambda);
-        let (st, ct) = theta.sin_cos();
+        let (st, ct) = (p.u, p.t);
         let (sl, cl) = lambda.sin_cos();
         // Spherical unit vectors in ECEF.
         let rhat = Vec3::new(st * cl, st * sl, ct);
@@ -537,13 +409,6 @@ impl GravityModel for SphericalHarmonicModel {
         // ∇V = ∂V/∂r r̂ + (1/r)∂V/∂θ θ̂ + (1/(r sinθ))∂V/∂λ λ̂.
         rhat * p.vr + thetahat * (p.vt / r) + lambdahat * (p.vl / (r * st))
     }
-}
-
-/// `dP̄_nm/dθ = [n·t·P̄_nm − f·P̄_{n-1,m}]/u`, `f = √(((2n+1)/(2n-1))(n-m)(n+m))`, for `m ≥ 1`
-/// (`P̄_nm` carries a factor `u^m`, so the division loses nothing).
-fn dp_dtheta(n: usize, m: usize, t: f64, u: f64, p_n: f64, p_nm1: f64) -> f64 {
-    let f = (((2 * n + 1) as f64 / (2 * n - 1) as f64) * ((n - m) * (n + m)) as f64).sqrt();
-    (n as f64 * t * p_n - f * p_nm1) / u
 }
 
 fn parse_f64(s: &str) -> Option<f64> {
@@ -640,6 +505,16 @@ gfc 2 2 2.439e-6 -1.400e-6
     }
 
     #[test]
+    fn from_coefficients_matches_new() {
+        let a = field(&[(3, 2, 1e-6, -2e-6)]);
+        let b = SphericalHarmonicModel::from_coefficients(a.coefficients().clone());
+        let p = Ecef::new(4.1e6, -3.3e6, 4.4e6);
+        assert_eq!(a.potential(p), b.potential(p));
+        assert_eq!(a.max_degree(), 4);
+        assert_eq!(b.coefficients().c(3, 2), 1e-6);
+    }
+
+    #[test]
     fn gfc_parser_refuses_what_it_cannot_represent() {
         let head = "earth_gravity_constant 3.986004415e14\nradius 6378136.3\nmax_degree 2\nend_of_head\n";
         for body in [
@@ -679,11 +554,11 @@ gfc 2 2 2.439e-6 -1.400e-6
 
     #[test]
     fn zonal_derivatives_stay_accurate_near_the_pole() {
-        // The generic (n·t·P̄ − f·P̄_{n−1})/sinθ form lost ~2 digits per decade of θ here.
+        // The old generic (n·t·P̄ − f·P̄_{n−1})/sinθ form lost ~2 digits per decade of θ here.
         let model = field(&[]);
         let (r, theta): (f64, f64) = (7.0e6, 1e-7);
         let p = model.synthesize(r, theta, 0.3);
-        let (t, u) = (theta.cos(), theta.sin());
+        let (t, u) = (p.t, p.u); // sinφ, cosφ as the synthesis rounded them
         let q = GRS80_A / r;
         let dp20 = -3.0 * 5f64.sqrt() * t * u;
         let dp40 = -3.0 / 8.0 * (140.0 * t.powi(3) - 60.0 * t) * u;

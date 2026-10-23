@@ -17,8 +17,8 @@ frames, time, and this. Everything is exact, data-free formula and `#![forbid(un
 ## What's in the slice
 
 - **`gravity`** — the gravitational field as a spherical-harmonic expansion (`SphericalHarmonicModel`)
-  behind a `GravityModel` trait: the Holmes–Featherstone stable recursion (with first and second
-  derivatives), the geopotential `W`, the gravity vector, geoid undulation, gravity disturbance and
+  behind a `GravityModel` trait, synthesized by the [`geopotential`](https://crates.io/crates/geopotential)
+  crate (Holmes–Featherstone, pole-safe first and second derivatives, to degree 2700): the geopotential `W`, the gravity vector, geoid undulation, gravity disturbance and
   anomaly, deflections of the vertical, the gravity-gradient (Marussi) tensor, GRS80/WGS84 normal
   fields, and an ICGEM `.gfc` parser. Bring your own coefficients — the algorithm is small, the data
   is not.

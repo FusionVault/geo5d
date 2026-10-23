@@ -2,6 +2,14 @@
 
 All notable changes to `geo5d`. Plain semver; tags `vX.Y.Z` at the published commit.
 
+## 0.4.0 — 2026-10-23
+
+The spherical-harmonic synthesis now comes from the [`geopotential`](https://crates.io/crates/geopotential) crate, which is re-exported. That is the same Holmes–Featherstone algorithm, with pole-safe first and second derivatives from neighbouring orders throughout. The two engines agreed to ~1e-15 in `V` on the real degree-300 GOCO06s model, and every existing test passes unchanged.
+
+- **New:** `SphericalHarmonicModel::from_coefficients` and `coefficients()`, to build a model from any `geopotential::Coefficients`, e.g. a time-variable ICGEM model read and evaluated at an epoch with the `gravity-field` crate.
+- **Breaking:** the serialized form of `SphericalHarmonicModel` (with the `serde` feature) is now a `geopotential::Coefficients` plus `omega`. Deserializing checks that the coefficient arrays match the degree.
+- **Breaking:** `from_gfc` refuses `max_degree` above 2700 (`GfcError::Unsupported`), the synthesis limit, instead of failing later.
+
 ## 0.3.0 — 2026-10-23
 
 Fixes near the poles and in the `.gfc` reader, from a cross-check against an independent synthesis (the `geopotential` crate) on the real degree-300 GOCO06s model. Away from the poles the two agree to ~1e-15 in `V` and ~1e-6 µGal in `|g|`. With these fixes they agree near the poles too.
