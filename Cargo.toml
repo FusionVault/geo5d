@@ -1,6 +1,6 @@
 # geo5d — the geopotential & relativistic dimension of geodesy, in pure f64.
 #
-# WORK IN PROGRESS — a thin vertical slice. Where geo3d answers "where" (frames) and geo4d answers
+# Where geo3d answers "where" (frames) and geo4d answers
 # "when" (time), geo5d answers how gravity and relativity warp both: normal gravity and geopotential,
 # height systems, chronometric leveling (clock frequency ↔ geopotential ↔ height), and the
 # relativistic clock-rate layer. Pure formulas, no data; absolute geopotential is bring-your-own via
@@ -10,11 +10,11 @@
 # unchanged from its own repository.
 [package]
 name = "geo5d"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 rust-version = "1.85"
-license = "Apache-2.0"
-description = "The geopotential & relativistic dimension of geodesy in pure f64: normal gravity, height systems, chronometric leveling (clock frequency ↔ geopotential ↔ height), and relativistic clock rates. Built on geo4d/geo3d. (Work in progress.)"
+license = "MIT"
+description = "Gravity and relativity for geodesy: normal gravity, heights from the geopotential, spherical-harmonic gravity models, and clocks as height meters (chronometric levelling)."
 repository = "https://github.com/FusionVault/geo5d"
 readme = "README.md"
 documentation = "https://docs.rs/geo5d"

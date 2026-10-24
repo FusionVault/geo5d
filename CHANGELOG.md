@@ -2,6 +2,11 @@
 
 All notable changes to `geo5d`. Plain semver; tags `vX.Y.Z` at the published commit.
 
+## 0.4.1 — 2026-10-24
+
+- **Licence:** now MIT (was Apache-2.0).
+- **Docs:** a shorter README with a figure, linked sources and a tested example. It is now also the crate's front page on docs.rs.
+
 ## 0.4.0 — 2026-10-23
 
 The spherical-harmonic synthesis now comes from the [`geopotential`](https://crates.io/crates/geopotential) crate, which is re-exported. That is the same Holmes–Featherstone algorithm, with pole-safe first and second derivatives from neighbouring orders throughout. The two engines agreed to ~1e-15 in `V` on the real degree-300 GOCO06s model, and every existing test passes unchanged.
