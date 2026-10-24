@@ -42,12 +42,25 @@ assert!((h - 1000.0).abs() < 0.1);
 | `NormalGravity` | Gravity of the reference ellipsoid (GRS80, WGS84) on and above it ([Moritz 2000](https://doi.org/10.1007/s001900050278)) |
 | `GeopotentialNumber` | Heights from the geopotential: dynamic, normal and orthometric |
 | `SphericalHarmonicModel` | Gravity, geoid, gravity anomalies, deflections and the gradient tensor from a model such as an ICGEM `.gfc` file, through [`geopotential`](https://crates.io/crates/geopotential) |
-| `relativity` | Clocks as height meters (chronometric levelling) and clock rates in TT and TCG ([IERS Conventions 2010](https://www.iers.org/TN36)) |
+| `relativity` | Clocks as height meters (chronometric levelling), clock rates in TT and TCG ([IERS Conventions 2010](https://www.iers.org/TN36)), and frame dragging: the Lense–Thirring drag of satellite orbits and the gyroscope precessions Gravity Probe B measured ([Everitt et al. 2011](https://arxiv.org/abs/1105.3456)) |
 | `transfer` | Relativistic corrections for GNSS and time transfer (Sagnac, Shapiro), and proper time along a trajectory |
 | `constants` | The defining constants, including both conventional values of W₀ |
 
 `geoid_undulation` returns the height anomaly (the quasigeoid). Over high mountains the classical
 geoid differs from it by up to about 1 m, because that needs an assumed crustal density.
+
+## Example: frame dragging
+
+A spinning Earth drags space around with it. The orbit of the LAGEOS satellite turns by about 31
+milliarcseconds a year because of it, which LAGEOS and LARES-2 measure to about 0.1%.
+
+```rust
+use geo5d::constants::EARTH_ANGULAR_MOMENTUM;
+use geo5d::relativity::{MAS_PER_YEAR, lense_thirring_node_rate};
+
+let drag = lense_thirring_node_rate(EARTH_ANGULAR_MOMENTUM, 12_270e3, 0.0045);
+println!("{:.2} mas/yr", drag * MAS_PER_YEAR); // 30.67
+```
 
 ## How it is checked
 
@@ -59,6 +72,8 @@ geoid differs from it by up to about 1 m, because that needs an assumed crustal 
 - **Geoid:** it matches [GeographicLib](https://geographiclib.sourceforge.io/) to a constant
   offset of about 9 cm, which comes from convention.
 - **GOCO06s:** on the degree-300 model, its synthesis matches `geopotential` to about 1e-15.
+- **Frame dragging:** LAGEOS's node drag (30.67 mas/yr) and Gravity Probe B's spherical-Earth
+  drifts (6,638 and 41.1 mas/yr).
 
 **Not included yet:**
 - a classical-geoid option from topographic heights;

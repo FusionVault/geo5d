@@ -24,6 +24,13 @@ pub const EARTH_ROTATION_RATE: f64 = 7.292_115_146_7e-5;
 /// The Sun's gravitational constant (IAU 2009, TDB-compatible), m³/s².
 pub const GM_SUN: f64 = 1.327_124_400_18e20;
 
+/// Newtonian constant of gravitation (CODATA 2018), m³ kg⁻¹ s⁻².
+pub const G_NEWTON: f64 = 6.674_30e-11;
+
+/// Earth's spin angular momentum `J = Iω`, kg m²/s (the value used by the LAGEOS and LARES
+/// frame-dragging analyses).
+pub const EARTH_ANGULAR_MOMENTUM: f64 = 5.86e33;
+
 // ── The reference geopotential W₀ — two conventional values, on purpose ──────────────────────────────
 //
 // There are two, and a careful crate must keep both with distinct roles:

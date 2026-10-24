@@ -123,6 +123,43 @@ pub fn fractional_rate_tcg_of(state: StateVector, gravitational_potential: f64) 
     fractional_rate_tcg(gravitational_potential, state.speed_mps())
 }
 
+// ── Frame dragging: the gravitomagnetic field of a spinning Earth ───────────────────────────────────
+
+/// Milliarcseconds per year in one rad/s, to state precession rates the way the literature does.
+pub const MAS_PER_YEAR: f64 = 365.25 * 86_400.0 * 180.0 / core::f64::consts::PI * 3.6e6;
+
+/// Lense–Thirring drag of an orbit's node, `2GJ/(c² a³ (1 − e²)^(3/2))`, rad/s, for a body of spin
+/// angular momentum `j` (kg m²/s), semi-major axis `a` (m) and eccentricity `e`. Measured for
+/// Earth to about one part in a thousand by LARES-2 and LAGEOS (Ciufolini et al., Nature 2026).
+///
+/// ```
+/// use geo5d::{constants::EARTH_ANGULAR_MOMENTUM, relativity::{MAS_PER_YEAR, lense_thirring_node_rate}};
+/// // LAGEOS: a = 12 270 km, e = 0.0045.
+/// let rate = lense_thirring_node_rate(EARTH_ANGULAR_MOMENTUM, 12_270e3, 0.0045) * MAS_PER_YEAR;
+/// assert!((rate - 30.67).abs() < 0.01); // milliarcseconds per year
+/// ```
+pub fn lense_thirring_node_rate(j: f64, a: f64, e: f64) -> f64 {
+    2.0 * crate::constants::G_NEWTON * j / (C2 * a.powi(3) * (1.0 - e * e).powf(1.5))
+}
+
+/// Lense–Thirring drag of the perigee, `−6GJ cos i/(c² a³ (1 − e²)^(3/2))`, rad/s, at inclination
+/// `inclination` (rad).
+pub fn lense_thirring_perigee_rate(j: f64, a: f64, e: f64, inclination: f64) -> f64 {
+    -3.0 * inclination.cos() * lense_thirring_node_rate(j, a, e)
+}
+
+/// Geodetic (de Sitter) precession of a gyroscope on a circular orbit of radius `a` (m) around a
+/// body of gravitational parameter `gm`, orbit-averaged: `(3/2)(GM)^(3/2)/(c² a^(5/2))`, rad/s.
+pub fn geodetic_precession(gm: f64, a: f64) -> f64 {
+    1.5 * gm.powf(1.5) / (C2 * a.powf(2.5))
+}
+
+/// Frame-dragging precession of a gyroscope on a circular polar orbit of radius `a` (m),
+/// orbit-averaged: `GJ/(2c²a³)`, rad/s (the effect Gravity Probe B measured).
+pub fn gyroscope_frame_dragging(j: f64, a: f64) -> f64 {
+    crate::constants::G_NEWTON * j / (2.0 * C2 * a.powi(3))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +212,18 @@ mod tests {
         let rate = sync_fractional_offset(100.0, 9.806_65);
         let per_day = accumulated_offset_seconds(rate, Duration::DAY);
         assert!(close(per_day, 9.4e-10, 1e-11), "{per_day}");
+    }
+
+    #[test]
+    fn frame_dragging_lageos_and_gravity_probe_b() {
+        use crate::constants::{EARTH_ANGULAR_MOMENTUM as J, GM_EARTH};
+        // LAGEOS node: 30.67 mas/yr. Perigee drag is −3 cos i times the node rate.
+        assert!(close(lense_thirring_node_rate(J, 12_270e3, 0.0045) * MAS_PER_YEAR, 30.67, 0.01));
+        let i = 109.8f64.to_radians();
+        assert!(close(lense_thirring_perigee_rate(J, 12_270e3, 0.0045, i) / lense_thirring_node_rate(J, 12_270e3, 0.0045), -3.0 * i.cos(), 1e-12));
+        // Gravity Probe B (a = 7013 km): 6638 mas/yr geodetic and 41.1 mas/yr frame dragging for a
+        // spherical Earth (measured: −6601.8 ± 18.3 and −37.2 ± 7.2; GR with oblateness: 6606, 39.2).
+        assert!(close(geodetic_precession(GM_EARTH, 7_013e3) * MAS_PER_YEAR, 6638.0, 1.0));
+        assert!(close(gyroscope_frame_dragging(J, 7_013e3) * MAS_PER_YEAR, 41.1, 0.1));
     }
 }

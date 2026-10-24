@@ -2,6 +2,10 @@
 
 All notable changes to `geo5d`. Plain semver; tags `vX.Y.Z` at the published commit.
 
+## 0.5.0 — 2026-10-24
+
+- **New:** frame dragging in `relativity`: `lense_thirring_node_rate`, `lense_thirring_perigee_rate`, `geodetic_precession`, `gyroscope_frame_dragging` and `MAS_PER_YEAR`; constants `G_NEWTON` and `EARTH_ANGULAR_MOMENTUM`. Checked against LAGEOS and Gravity Probe B.
+
 ## 0.4.1 — 2026-10-24
 
 - **Licence:** now MIT (was Apache-2.0).
