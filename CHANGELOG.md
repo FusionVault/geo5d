@@ -2,6 +2,11 @@
 
 All notable changes to `geo5d`. Plain semver; tags `vX.Y.Z` at the published commit.
 
+## 0.5.1
+
+- Gravity Probe B check uses its real orbit (a = 7027.4 km) and the published predictions
+  (6606.1 and 39.2 mas/yr, the latter projected on the guide star).
+
 ## 0.5.0 — 2026-10-24
 
 - **New:** frame dragging in `relativity`: `lense_thirring_node_rate`, `lense_thirring_perigee_rate`, `geodetic_precession`, `gyroscope_frame_dragging` and `MAS_PER_YEAR`; constants `G_NEWTON` and `EARTH_ANGULAR_MOMENTUM`. Checked against LAGEOS and Gravity Probe B.

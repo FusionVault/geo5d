@@ -72,8 +72,8 @@ println!("{:.2} mas/yr", drag * MAS_PER_YEAR); // 30.67
 - **Geoid:** it matches [GeographicLib](https://geographiclib.sourceforge.io/) to a constant
   offset of about 9 cm, which comes from convention.
 - **GOCO06s:** on the degree-300 model, its synthesis matches `geopotential` to about 1e-15.
-- **Frame dragging:** LAGEOS's node drag (30.67 mas/yr) and Gravity Probe B's spherical-Earth
-  drifts (6,638 and 41.1 mas/yr).
+- **Frame dragging:** LAGEOS's node drag (30.67 mas/yr) and Gravity Probe B's predicted drifts,
+  6,606 mas/yr geodetic and 39.2 mas/yr frame dragging projected on its guide star.
 
 **Not included yet:**
 - a classical-geoid option from topographic heights;

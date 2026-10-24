@@ -221,9 +221,13 @@ mod tests {
         assert!(close(lense_thirring_node_rate(J, 12_270e3, 0.0045) * MAS_PER_YEAR, 30.67, 0.01));
         let i = 109.8f64.to_radians();
         assert!(close(lense_thirring_perigee_rate(J, 12_270e3, 0.0045, i) / lense_thirring_node_rate(J, 12_270e3, 0.0045), -3.0 * i.cos(), 1e-12));
-        // Gravity Probe B (a = 7013 km): 6638 mas/yr geodetic and 41.1 mas/yr frame dragging for a
-        // spherical Earth (measured: −6601.8 ± 18.3 and −37.2 ± 7.2; GR with oblateness: 6606, 39.2).
-        assert!(close(geodetic_precession(GM_EARTH, 7_013e3) * MAS_PER_YEAR, 6638.0, 1.0));
-        assert!(close(gyroscope_frame_dragging(J, 7_013e3) * MAS_PER_YEAR, 41.1, 0.1));
+        // Gravity Probe B, polar orbit at a = 7027.4 km: 6603.9 mas/yr geodetic and 40.81 mas/yr
+        // frame dragging. The published predictions are 6606.1 and 39.2: the latter is the drift
+        // projected on the guide star IM Pegasi, 40.81 × cos 16.84° = 39.06 (Everitt et al. 2011;
+        // measured −6601.8 ± 18.3 and −37.2 ± 7.2).
+        assert!(close(geodetic_precession(GM_EARTH, 7_027.4e3) * MAS_PER_YEAR, 6603.9, 0.5));
+        assert!(close(gyroscope_frame_dragging(J, 7_027.4e3) * MAS_PER_YEAR, 40.81, 0.02));
+        assert!(close(geodetic_precession(GM_EARTH, 7_027.4e3) * MAS_PER_YEAR, 6606.1, 3.0));
+        assert!(close(gyroscope_frame_dragging(J, 7_027.4e3) * MAS_PER_YEAR * 16.84f64.to_radians().cos(), 39.2, 0.2));
     }
 }
