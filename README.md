@@ -1,5 +1,27 @@
 # geo5d
 
+**Folded into [physica](https://github.com/FusionVault/physica).** Version 0.6.0 is the final
+release: every item is deprecated with a note naming its new home, and nothing else changed. The
+same formulas, tested against the same published values and more, now live in
+
+| geo5d | physica |
+|---|---|
+| `NormalGravity`, GRS80 and WGS84 constants | [`geopotential::normal`](https://docs.rs/geopotential) |
+| `GeopotentialNumber` (heights) | `geopotential::normal::NormalGravity::{dynamic_height, normal_height}` |
+| `SphericalHarmonicModel` (gravity, geoid, deflections, gradients) | `geopotential::Coefficients`, `Partials`, `normal::bruns` |
+| `relativity` (clocks) and `transfer` | [`gravimetry::clocks`](https://docs.rs/gravimetry) |
+| `relativity` (periapsis, de Sitter) | [`gravitational::energy`](https://docs.rs/gravitational) |
+| `relativity` (frame dragging) | [`gravitics::gem`](https://docs.rs/gravitics) |
+| `constants` | [`metrology`](https://docs.rs/metrology) |
+
+```bash
+cargo add geopotential gravimetry
+```
+
+The original description follows.
+
+---
+
 Gravity and relativity for geodesy. It covers normal gravity, heights from the geopotential,
 gravity from spherical-harmonic models, and the link between clocks and heights: a clock runs
 faster the higher it is. Pure Rust, `f64`, no unsafe code.

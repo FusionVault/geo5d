@@ -15,6 +15,10 @@ use crate::normal::NormalGravity;
 /// let dyn_h = c.dynamic_height(NormalGravity::GRS80.gamma_45());
 /// assert!((dyn_h - 1_000.0).abs() < 1e-6);
 /// ```
+#[deprecated(
+    since = "0.6.0",
+    note = "moved to geopotential::normal::NormalGravity::{dynamic_height, normal_height}"
+)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GeopotentialNumber {
