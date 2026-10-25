@@ -129,6 +129,22 @@ mod tests {
     }
 
     #[test]
+    fn cassini_round_trip_shapiro_delay() {
+        // Cassini's 2002 conjunction (Will 2014, arXiv:1403.7377): the spacecraft at 8.43 AU, the
+        // ray 1.6 R☉ from the Sun. Twice the one-way delay is 262.4 µs; Will's Eq. 63 shorthand,
+        // ½(1 + γ)[240 − 20 ln(d²/r)] µs, gives 263.8.
+        let (au, b): (f64, f64) = (149_597_870_700.0, 1.6 * 6.957e8);
+        let (r1, r2) = (au, 8.43 * au);
+        let r12 = (r1 * r1 - b * b).sqrt() + (r2 * r2 - b * b).sqrt();
+        let round_trip = 2.0 * shapiro_delay(crate::constants::GM_SUN, r1, r2, r12) * 1e6;
+        let will = 240.0 - 20.0 * (1.6f64.powi(2) / 8.43).ln();
+        assert!(
+            close(round_trip, 262.42, 0.01) && close(round_trip / will, 1.0, 0.006),
+            "{round_trip} µs"
+        );
+    }
+
+    #[test]
     fn one_way_transfer_is_dominated_by_light_time() {
         let sat = Ecef::new(26_000_000.0, 5_000_000.0, 3_000_000.0);
         let rcv = Ecef::new(6_378_137.0, 0.0, 0.0);
