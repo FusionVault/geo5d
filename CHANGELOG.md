@@ -2,7 +2,7 @@
 
 All notable changes to `geo5d`. Plain semver; tags `vX.Y.Z` at the published commit.
 
-## Unreleased
+## 0.5.2 — 2026-10-25
 
 - **New:** `relativity::perihelion_advance`, `6πGM/(c²a(1 − e²))` per orbit.
 - **Tests:** published values for the existing formulas, each read from its paper: JILA's and
