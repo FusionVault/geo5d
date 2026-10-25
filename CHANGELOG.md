@@ -2,6 +2,26 @@
 
 All notable changes to `geo5d`. Plain semver; tags `vX.Y.Z` at the published commit.
 
+## 0.6.0 — 2026-10-25, the final release
+
+geo5d is folded into [physica](https://github.com/FusionVault/physica), which `geopotential`
+(its synthesis engine) already came from. Every module is deprecated with a note naming its new
+home; nothing else changed, so existing code keeps working with the warnings:
+
+| geo5d | physica |
+|---|---|
+| `NormalGravity`, `constants::GRS80_*`, `WGS84_*` | `geopotential::normal::{NormalGravity, GRS80, WGS84}`, from the four defining constants |
+| `GeopotentialNumber` | `geopotential::normal::NormalGravity::{dynamic_height, normal_height}` |
+| `SphericalHarmonicModel` | `geopotential::Coefficients` (`read_gfc`), `Partials::{geopotential, gravity_neu, deflections}`, `normal::bruns`, `SecondPartials::tensor_neu` |
+| `relativity` (clocks) | `gravimetry::clocks` |
+| `relativity::{perihelion_advance, geodetic_precession}` | `gravitational::energy::{periastron_advance, geodetic_precession}` |
+| `relativity::{lense_thirring_*, gyroscope_frame_dragging, MAS_PER_YEAR}` | `gravitics::gem` |
+| `transfer` | `gravimetry::clocks` |
+| `constants::{L_G, L_B, W0_IAU, W0_IHRS, EARTH_ANGULAR_MOMENTUM, GM_SUN, …}` | `metrology` |
+
+Two defects found in the move, fixed on the physica side: the "GRS80 normal field" carried
+WGS84's even zonals, and its C̄₈₀ was ten times too large (0.346×10⁻¹⁰ for 0.346×10⁻¹¹).
+
 ## 0.5.2 — 2026-10-25
 
 - **New:** `relativity::perihelion_advance`, `6πGM/(c²a(1 − e²))` per orbit.

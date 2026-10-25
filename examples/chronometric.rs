@@ -4,6 +4,8 @@
 //!
 //! `cargo run --example chronometric`
 
+#![allow(deprecated)] // the crate is folded into physica; this example shows the old API
+
 use geo5d::{
     relativity, transfer, Duration, Ecef, Epoch, Geodetic, GeopotentialNumber, NormalGravity, SphericalHarmonicModel,
     StateVector, Trajectory, Vec3, W0_IHRS,

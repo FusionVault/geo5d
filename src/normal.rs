@@ -18,6 +18,10 @@ use geo4d::Geodetic;
 /// // At 45° it equals the dynamic-height reference γ₄₅.
 /// assert!((NormalGravity::GRS80.at_latitude(45.0) - 9.806_199_203).abs() < 1e-6);
 /// ```
+#[deprecated(
+    since = "0.6.0",
+    note = "moved to geopotential::normal::{NormalGravity, GRS80, WGS84}, built from the four defining constants"
+)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NormalGravity {

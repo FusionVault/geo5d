@@ -10,11 +10,11 @@
 # unchanged from its own repository.
 [package]
 name = "geo5d"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT"
-description = "Gravity and relativity for geodesy: normal gravity, heights from the geopotential, spherical-harmonic gravity models, and clocks as height meters (chronometric levelling)."
+description = "Folded into the physica crates (geopotential, gravimetry, gravitational, gravitics); this final release deprecates every item and names its new home."
 repository = "https://github.com/FusionVault/geo5d"
 readme = "README.md"
 documentation = "https://docs.rs/geo5d"
