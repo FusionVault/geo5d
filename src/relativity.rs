@@ -160,6 +160,23 @@ pub fn gyroscope_frame_dragging(j: f64, a: f64) -> f64 {
     crate::constants::G_NEWTON * j / (2.0 * C2 * a.powi(3))
 }
 
+/// The relativistic advance of an orbit's periapsis, `6πGM/(c²a(1 − e²))` radians per orbit, for
+/// semi-major axis `a` (m) and eccentricity `e` about a body of gravitational parameter `gm`: the
+/// first term of [Will (2014)](https://arxiv.org/abs/1403.7377), Eq. 64, with `γ = β = 1`.
+///
+/// ```
+/// use geo5d::{constants::GM_SUN, relativity::perihelion_advance};
+/// // Mercury (JPL's mean elements at J2000): 42.98″ per century (Will 2014, Eq. 65).
+/// let (au, arcsec) = (149_597_870_700.0, core::f64::consts::PI / 648_000.0);
+/// let (a, e) = (0.387_099_27 * au, 0.205_635_93);
+/// let period = 2.0 * core::f64::consts::PI * (a * a * a / GM_SUN).sqrt();
+/// let per_century = perihelion_advance(GM_SUN, a, e) * 36_525.0 * 86_400.0 / period / arcsec;
+/// assert!((per_century - 42.98).abs() < 0.005);
+/// ```
+pub fn perihelion_advance(gm: f64, a: f64, e: f64) -> f64 {
+    6.0 * core::f64::consts::PI * gm / (C2 * a * (1.0 - e * e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,19 +232,101 @@ mod tests {
     }
 
     #[test]
+    fn clock_gradients_across_a_millimetre_and_a_centimetre() {
+        // A clock Δh higher sits at ΔW = −gΔh and runs faster by gΔh/c². Bothwell et al. (2022,
+        // arXiv:2109.12238) at g = 9.796 m/s² (USGS): 1.09×10⁻¹⁹ per mm, measured 0.98(23)×10⁻¹⁹.
+        let jila = fractional_frequency_shift(-9.796 * 1e-3);
+        assert!(
+            close(jila, 1.09e-19, 5e-22) && (jila - 0.98e-19).abs() < 2.3e-20,
+            "{jila}"
+        );
+        // Zheng et al. (2023, arXiv:2207.07145) at g = 9.803 m/s²: 10.9×10⁻¹⁹ per cm, measured
+        // 12.4 ± 0.7 ± 2.5, 0.57σ away.
+        let wisconsin = fractional_frequency_shift(-9.803 * 1e-2);
+        assert!(close(wisconsin, 10.9e-19, 5e-21), "{wisconsin}");
+        assert!(((12.4e-19 - wisconsin) / 0.7f64.hypot(2.5) / 1e-19 - 0.575).abs() < 0.001);
+    }
+
+    #[test]
+    fn the_suns_redshift_seen_from_the_earth() {
+        // González Hernández et al. (2020, arXiv:2009.10558): GM☉/(cR☉) = 636.31 m/s at the
+        // photosphere, 633.35 at 1 AU, 633.10 at the Earth on 2010 November 25 (147.75 million km,
+        // less the Earth's own 0.21; the text calls the distance correction +4 cm/s, but it lowers
+        // the value); measured 638 ± 6 m/s.
+        use crate::constants::{GM_EARTH, GM_SUN, SPEED_OF_LIGHT as C};
+        let (r_sun, r_earth, au) = (6.957e8, 6.3781e6, 149_597_870_700.0); // IAU 2015 nominal
+        let speed = |w_clock: f64, w_ref: f64| -C * fractional_frequency_shift(w_clock - w_ref);
+        assert!(close(speed(GM_SUN / r_sun, 0.0), 636.31, 0.005));
+        assert!(close(speed(GM_SUN / r_sun, GM_SUN / au), 633.35, 0.005));
+        let seen = speed(GM_SUN / r_sun, GM_SUN / 147.75e9 + GM_EARTH / r_earth);
+        assert!(close(seen, 633.10, 0.01) && (638.0 - seen).abs() < 6.0, "{seen}");
+    }
+
+    #[test]
+    fn precession_of_orbits_and_gyroscopes() {
+        use crate::constants::GM_SUN;
+        let (au, arcsec) = (149_597_870_700.0, core::f64::consts::PI / 648_000.0);
+        let century = 36_525.0 * 86_400.0;
+        // The Earth–Moon system as a gyroscope round the Sun: "about 2 arcseconds per century"
+        // (Will 2014, after Eq. 70).
+        let de_sitter = geodetic_precession(GM_SUN, au) * century / arcsec;
+        assert!(
+            close(de_sitter, 1.919, 0.001) && close(de_sitter, 2.0, 0.1),
+            "{de_sitter}"
+        );
+        // S2 round Sgr A* (GRAVITY 2020, arXiv:2004.07187): M = 4.261×10⁶ M☉, R₀ = 8246.7 pc,
+        // a = 125.058 mas, e = 0.884649 (Table E.1) give 12.16′ per orbit, against their 12.1′
+        // (Eq. 1); they measured f_SP = 1.10 ± 0.19 times it.
+        let a = 125.058e-3 * 8246.7 * au; // an angle in arcseconds at a distance in parsecs is AU
+        let s2 = perihelion_advance(4.261e6 * GM_SUN, a, 0.884_649) / arcsec / 60.0;
+        assert!(close(s2, 12.156, 0.001) && close(s2, 12.1, 0.06), "{s2}");
+        // A circle advances 6πGM/(c²a), and the advance diverges as e → 1 at fixed a.
+        assert!(close(
+            perihelion_advance(GM_SUN, au, 0.0),
+            6.0 * core::f64::consts::PI * GM_SUN / (C2 * au),
+            1e-25
+        ));
+        assert!(perihelion_advance(GM_SUN, au, 0.99) > 50.0 * perihelion_advance(GM_SUN, au, 0.0));
+    }
+
+    #[test]
     fn frame_dragging_lageos_and_gravity_probe_b() {
         use crate::constants::{EARTH_ANGULAR_MOMENTUM as J, GM_EARTH};
         // LAGEOS node: 30.67 mas/yr. Perigee drag is −3 cos i times the node rate.
-        assert!(close(lense_thirring_node_rate(J, 12_270e3, 0.0045) * MAS_PER_YEAR, 30.67, 0.01));
+        assert!(close(
+            lense_thirring_node_rate(J, 12_270e3, 0.0045) * MAS_PER_YEAR,
+            30.67,
+            0.01
+        ));
         let i = 109.8f64.to_radians();
-        assert!(close(lense_thirring_perigee_rate(J, 12_270e3, 0.0045, i) / lense_thirring_node_rate(J, 12_270e3, 0.0045), -3.0 * i.cos(), 1e-12));
+        assert!(close(
+            lense_thirring_perigee_rate(J, 12_270e3, 0.0045, i) / lense_thirring_node_rate(J, 12_270e3, 0.0045),
+            -3.0 * i.cos(),
+            1e-12
+        ));
         // Gravity Probe B, polar orbit at a = 7027.4 km: 6603.9 mas/yr geodetic and 40.81 mas/yr
         // frame dragging. The published predictions are 6606.1 and 39.2: the latter is the drift
         // projected on the guide star IM Pegasi, 40.81 × cos 16.84° = 39.06 (Everitt et al. 2011;
         // measured −6601.8 ± 18.3 and −37.2 ± 7.2).
-        assert!(close(geodetic_precession(GM_EARTH, 7_027.4e3) * MAS_PER_YEAR, 6603.9, 0.5));
-        assert!(close(gyroscope_frame_dragging(J, 7_027.4e3) * MAS_PER_YEAR, 40.81, 0.02));
-        assert!(close(geodetic_precession(GM_EARTH, 7_027.4e3) * MAS_PER_YEAR, 6606.1, 3.0));
-        assert!(close(gyroscope_frame_dragging(J, 7_027.4e3) * MAS_PER_YEAR * 16.84f64.to_radians().cos(), 39.2, 0.2));
+        assert!(close(
+            geodetic_precession(GM_EARTH, 7_027.4e3) * MAS_PER_YEAR,
+            6603.9,
+            0.5
+        ));
+        assert!(close(
+            gyroscope_frame_dragging(J, 7_027.4e3) * MAS_PER_YEAR,
+            40.81,
+            0.02
+        ));
+        assert!(close(
+            geodetic_precession(GM_EARTH, 7_027.4e3) * MAS_PER_YEAR,
+            6606.1,
+            3.0
+        ));
+        assert!(close(
+            gyroscope_frame_dragging(J, 7_027.4e3) * MAS_PER_YEAR * 16.84f64.to_radians().cos(),
+            39.2,
+            0.2
+        ));
     }
 }

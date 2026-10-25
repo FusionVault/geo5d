@@ -2,6 +2,14 @@
 
 All notable changes to `geo5d`. Plain semver; tags `vX.Y.Z` at the published commit.
 
+## Unreleased
+
+- **New:** `relativity::perihelion_advance`, `6πGM/(c²a(1 − e²))` per orbit.
+- **Tests:** published values for the existing formulas, each read from its paper: JILA's and
+  Wisconsin's clock gradients, the solar redshift seen from the Earth, Cassini's Shapiro delay,
+  the lunar de Sitter precession, Mercury's perihelion and S2's Schwarzschild precession.
+- `cargo fmt` over the crate, which CI checks.
+
 ## 0.5.1
 
 - Gravity Probe B check uses its real orbit (a = 7027.4 km) and the published predictions
